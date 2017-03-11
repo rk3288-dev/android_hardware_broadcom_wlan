@@ -31,6 +31,37 @@ typedef struct android_wifi_priv_cmd {
 
 static int drv_errors = 0;
 
+#define WIFI_CHIP_TYPE_PATH	"/sys/class/rkwifi/chip"
+static char wifi_chip_type[64];
+static int check_wifi_chip_type_string(char *type)
+{
+    int wififd, ret = 0;
+    char buf[64];
+
+    wififd = open(WIFI_CHIP_TYPE_PATH, O_RDONLY);
+    if( wififd < 0 ){
+        //ALOGD("Can't open %s, errno = %d", WIFI_CHIP_TYPE_PATH, errno);
+        ret = -1;
+        goto fail_exit;
+    }
+    memset(buf, 0, 64);
+
+    if( 0 == read(wififd, buf, 10) ){
+        //ALOGD("read %s failed", WIFI_CHIP_TYPE_PATH);
+        close(wififd);
+        ret = -1;
+        goto fail_exit;
+    }
+    close(wififd);
+    
+    strcpy(type, buf);
+    
+    wpa_printf(MSG_ERROR, "%s: %s", __func__, type);
+
+fail_exit:
+    return ret;
+}
+
 static void wpa_driver_send_hang_msg(struct wpa_driver_nl80211_data *drv)
 {
 	drv_errors++;
@@ -115,6 +146,21 @@ int wpa_driver_nl80211_driver_cmd(void *priv, char *cmd, char *buf,
 		priv_cmd.total_len = buf_len;
 		ifr.ifr_data = &priv_cmd;
 
+                if(wifi_chip_type[0] == 0)
+                  check_wifi_chip_type_string(wifi_chip_type);
+                if(!strcmp(wifi_chip_type, "ESP8089")){
+                 //add by xxh ESP8089 Any unsupport private command go continue
+                        drv_errors = 0;
+                        ret = 0;
+                        if ((os_strcasecmp(cmd, "LINKSPEED") == 0) ||
+                            (os_strcasecmp(cmd, "RSSI") == 0) ||
+                            (os_strcasecmp(cmd, "GETBAND") == 0) ||
+                            (os_strncasecmp(cmd, "WLS_BATCHING", 12) == 0))
+                                ret = strlen(buf);
+                        wpa_driver_notify_country_change(drv->ctx, cmd);
+                        wpa_printf(MSG_DEBUG, "%s %s len = %d, %zu", __func__, buf, ret, strlen(buf));
+                } else {               
+
 		if ((ret = ioctl(drv->global->ioctl_sock, SIOCDEVPRIVATE + 1, &ifr)) < 0) {
 			wpa_printf(MSG_ERROR, "%s: failed to issue private command: %s", __func__, cmd);
 			wpa_driver_send_hang_msg(drv);
@@ -129,6 +175,7 @@ int wpa_driver_nl80211_driver_cmd(void *priv, char *cmd, char *buf,
 			wpa_driver_notify_country_change(drv->ctx, cmd);
 			wpa_printf(MSG_DEBUG, "%s %s len = %d, %zu", __func__, buf, ret, strlen(buf));
 		}
+            }
 	}
 	return ret;
 }
